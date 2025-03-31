@@ -22,11 +22,24 @@ from openai import OpenAI
 # Load environment variables
 load_dotenv()
 
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Integrated API Services",
     description="Combines financial analysis, image generation, and SLA breach analysis",
     version="1.0.0"
+)
+
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Configure the media folder
