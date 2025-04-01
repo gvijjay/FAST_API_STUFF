@@ -132,7 +132,7 @@ def generate_image(prompt: str, size: str):
 
     response = client.images.generate(
         model="dall-e-3",
-        prompt=f"Realistic illustration of images with rich details, lifelike characters, and a dynamic atmosphere for {prompt}",
+        prompt=f"Ultra-realistic photograph of {prompt},highly detailed, lifelike, natural lighting, cinematic composition, 8K resolution",
         n=1,
         size=size
     )
@@ -276,14 +276,30 @@ def calculate_time_differences(csv_data):
         ("Forwarded", "Work in progress"),
         ("Assigned", "Work in progress"),
         ("Work in progress", "Suspended"),
-        ("Work in progress", "Solved"),
-        #("Suspended", "Solved"),
-        ("Forwarded", "Suspended")
+        ("Forwarded", "Suspended"),
+        ("Work in progress", "Solved")
     }
 
     transition_pairs = csv_data[
         ['Historical Status - Status From', 'Historical Status - Status To']
     ].apply(tuple, axis=1)
+
+    print("-------------------------------------------------------")
+    filtered_data = csv_data[csv_data['Request - ID'] == 'A3033017L']
+
+    # Select the required columns
+    required_columns = [
+        'Request - ID',
+        'Historical Status - Change Date',
+        'Change Datetime',
+        'Change',
+        'Historical Status - Status From',
+        'Historical Status - Status To'
+    ]
+
+    # Print the first 20 rows of the filtered data
+    print(filtered_data[required_columns])
+
 
     return csv_data[transition_pairs.isin(allowed_transitions)].copy()
 
@@ -303,6 +319,13 @@ def calculate_sla_breach(csv_data):
 
     csv_data['Breached'] = np.where(csv_data['Total Elapsed Time'] > csv_data['SLA Hours'], 'Yes', 'No')
     csv_data['Final_Status'] = csv_data.groupby('Request - ID')['Historical Status - Status To'].transform('last')
+
+    print("-------------------------------------------------------")
+    filtered_data = csv_data[csv_data['Request - ID'] == 'A3033017L']
+
+    # Print the first 20 rows of the filtered data
+    print(filtered_data)
+
     return csv_data
 
 
@@ -350,6 +373,7 @@ def generate_report(csv_data):
         'Breached': 'Breached'
     }, inplace=True)
 
+    print(filtered_data[filtered_data["Breached"] =="Yes"])
     return report_data
 
 
@@ -426,16 +450,30 @@ def markdown_to_html(md_text):
 
 @app.post("/sla_processing")
 async def process_sla_file(file: UploadFile = File(...)):
-    """Process SLA CSV file and generate report."""
+    """Process SLA file (CSV or Excel) and generate report."""
     try:
-        if not file.filename.endswith('.csv'):
-            raise HTTPException(status_code=400, detail="Invalid file format. Please upload a CSV file.")
+        # Validate file extension
+        valid_extensions = ['.csv', '.xlsx', '.xls']
+        file_ext = os.path.splitext(file.filename)[1].lower()
 
+        if file_ext not in valid_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file format. Please upload a CSV or Excel file. Valid extensions: {', '.join(valid_extensions)}"
+            )
+
+        # Save the uploaded file
         file_path = os.path.join(MEDIA_ROOT, file.filename)
         with open(file_path, "wb") as buffer:
             buffer.write(await file.read())
 
-        csv_data = pd.read_csv(file_path)
+        # Read file based on extension
+        if file_ext == '.csv':
+            csv_data = pd.read_csv(file_path)
+        else:  # Excel files
+            csv_data = pd.read_excel(file_path)
+
+        # Process the data
         sorted_data = preprocess_data(csv_data)
         csv_data = calculate_time_differences(sorted_data)
         csv_data = calculate_sla_breach(csv_data)
@@ -450,7 +488,6 @@ async def process_sla_file(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
-
 
 @app.post("/sla_query")
 async def sla_query(query: str = Form(...)):
