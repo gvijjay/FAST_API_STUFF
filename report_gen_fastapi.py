@@ -603,6 +603,7 @@ async def sla_query(query: str = Form(...)):
         code = generate_code(prompt_eng)
         print(code)
         result = execute_py_code(code, df)
+        print(result)
         return JSONResponse({"answer": result})
 
     except Exception as e:
