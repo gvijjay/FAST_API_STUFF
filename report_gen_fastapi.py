@@ -298,8 +298,8 @@ def calculate_time_differences(csv_data):
     ]
 
     # Print the first 20 rows of the filtered data
+    print("After seperation...................")
     print(filtered_data[required_columns])
-
 
     return csv_data[transition_pairs.isin(allowed_transitions)].copy()
 
@@ -321,6 +321,7 @@ def calculate_sla_breach(csv_data):
     csv_data['Final_Status'] = csv_data.groupby('Request - ID')['Historical Status - Status To'].transform('last')
 
     print("-------------------------------------------------------")
+    print(csv_data.columns)
     filtered_data = csv_data[csv_data['Request - ID'] == 'A3033017L']
 
     # Print the first 20 rows of the filtered data
@@ -359,13 +360,18 @@ def generate_report(csv_data):
 
     report_data = filtered_data[[
         'Request - ID', 'Request - Priority Description', 'Request - Resource Assigned To - Name',
+        'Change Datetime',
         'SLA Hours', 'Total Elapsed Time', 'Time_to_breach', 'Final_Status', 'Breached'
     ]].drop_duplicates()
+
+    # Convert datetime to string
+    report_data['Change Datetime'] = report_data['Change Datetime'].dt.strftime('%Y-%m-%d %H:%M:%S')
 
     report_data.rename(columns={
         'Request - ID': 'Ticket',
         'Request - Priority Description': 'Priority',
         'Request - Resource Assigned To - Name': 'Assigned To',
+        'Change Datetime': 'Changed_time',
         'SLA Hours': 'Allowed Duration(in Hours)',
         'Total Elapsed Time': 'Total Elapsed Time(in Hours)',
         'Time_to_breach': 'Time to Breach(in Hours)',
@@ -373,7 +379,7 @@ def generate_report(csv_data):
         'Breached': 'Breached'
     }, inplace=True)
 
-    print(filtered_data[filtered_data["Breached"] =="Yes"])
+    print(filtered_data[filtered_data["Breached"] == "Yes"])
     return report_data
 
 
@@ -489,6 +495,7 @@ async def process_sla_file(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
+
 @app.post("/sla_query")
 async def sla_query(query: str = Form(...)):
     """Handle SLA-related queries."""
@@ -558,6 +565,7 @@ async def sla_query(query: str = Form(...)):
             """
 
         code = generate_code(prompt_eng)
+        print(code)
         result = execute_py_code(code, df)
         return JSONResponse({"answer": result})
 
