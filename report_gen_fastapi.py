@@ -560,6 +560,39 @@ async def sla_query(query: str = Form(...)):
             7. Strict Query Handling:
                 - If the query is unclear, return "Invalid query: Please clarify your request."
                 - Do not generate responses based on assumptions.
+                
+            8.Special Handling for DateTime Queries:
+                - When processing date/time ranges, use this exact template:
+                    ```python
+                    import pandas as pd
+                    # Load the dataset
+                    df = pd.read_csv('{csv_file_path}')
+                    
+                    # Convert Changed_time to datetime for filtering
+                    df['Changed_time'] = pd.to_datetime(df['Changed_time'])
+                    
+                    # Filter for breached tickets with the specified date range
+                    filtered_df = df[(df['Breached'] == 'Yes') & 
+                                    (df['Changed_time'] >= 'START_DATE') & 
+                                    (df['Changed_time'] < 'END_DATE')]
+                    
+                    # Select relevant columns
+                    result_df = filtered_df[['Ticket', 'Priority', 'Assigned To', 
+                                           'Allowed Duration(in Hours)', 
+                                           'Total Elapsed Time(in Hours)', 
+                                           'Time to Breach(in Hours)', 
+                                           'Status', 'Breached']]
+                    
+                    # Create the HTML table output
+                    html_output = result_df.to_html(index=False, header=True, 
+                                                  table_id="breached_tickets")
+                    
+                    print(html_output)
+                    ```
+                - Replace START_DATE and END_DATE with the actual dates from the query
+                - Use inclusive lower bound (>=) and exclusive upper bound (<) for date ranges
+                - Always include the datetime conversion step
+                - Maintain this exact column selection for consistency
 
             User Query: {query}
             """
