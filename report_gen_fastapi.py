@@ -507,10 +507,13 @@ async def sla_query(query: str = Form(...)):
             return JSONResponse({"answer": markdown_to_html(greeting_response)})
 
         csv_file_path = os.path.join(MEDIA_ROOT, 'final_report.csv')
+        print(csv_file_path)
         if not os.path.exists(csv_file_path):
             raise HTTPException(status_code=400, detail="CSV file not found. Please upload the file first.")
 
         df = pd.read_csv(csv_file_path)
+        print(df.head(5))
+
         metadata_str = ", ".join(df.columns.tolist())
 
         prompt_eng = f"""
