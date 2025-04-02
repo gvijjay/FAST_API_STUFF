@@ -563,7 +563,7 @@ async def sla_query(query: str = Form(...)):
             - Use proper `<table>`, `<thead>`, `<tbody>`, `<tr>`, and `<td>` tags.
             - Ensure the table structure is well-formed.
             - For date range results, include the date column used for filtering.
-            - Html result generation should be properly done like 'table_id' checking etc.
+            - Html conversion should be properly done like considering the accurate 'table_id' etc.
 
         6. Download Handling:
             - Only generate a downloadable CSV file if explicitly requested.
