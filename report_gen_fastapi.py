@@ -514,68 +514,55 @@ async def sla_query(query: str = Form(...)):
         metadata_str = ", ".join(df.columns.tolist())
 
         prompt_eng = f"""
-        You are a Python expert specializing in data preprocessing. Your task is to answer user queries strictly based on the dataset `{csv_file_path}`. Follow these strict rules:
+            You are a Python expert specializing in data preprocessing. Your task is to answer user queries strictly based on the dataset `{csv_file_path}`. Follow these strict rules:
 
-        1. Strict Dataset Constraints:
-            - You can only refer to the columns and data present in the CSV.
-            - Do not make any assumptions or external calculations.
-            - Available columns: {metadata_str}.
-            - Dataset preview (first 10 rows):  
-              {df.head(10)}
+            1. Strict Dataset Constraints:
+                - You can only refer to the columns and data present in the CSV.
+                - Do not make any assumptions or external calculations.
+                - Available columns: {metadata_str}.
+                - Dataset preview (first 10 rows):  
+                  {df.head(10)}
 
-        2. Rules for Query Execution:
-            - Perform operations directly on the dataset.
-            - Do not assume missing data unless explicitly mentioned.
-            - No implicit conversions (e.g., do not convert hours to minutes unless specified).
-            - Only return results filtered exactly as per the query.
-            - For date range queries (like "from X to Y"), use inclusive bounds.
+            2. Rules for Query Execution:
+                - Perform operations directly on the dataset.
+                - Do not assume missing data unless explicitly mentioned.
+                - No implicit conversions (e.g., do not convert hours to minutes unless specified).
+                - Only return results filtered exactly as per the query.
 
-        3. Handling Ticket Queries:
-            - If the query is about breached tickets, only consider rows where 'Breached' == "Yes".
-            - For date range queries on tickets:
-                - First verify the dataset contains date columns (like 'Created Date', 'Resolved Date', etc.)
-                - Filter tickets where the relevant date falls within the specified range
-                - If no specific date column is mentioned, use the most logical date column (e.g., 'Created Date')
-            - For queries involving ticket lists, only return the following columns:
-                - Ticket  
-                - Priority  
-                - Assigned To  
-                - Allowed Duration  
-                - Total Elapsed Time  
-                - Time to Breach  
-                - Status  
-                - Breached  
-                - Relevant Date Column (if date range is specified)
+            3. Handling Ticket Queries:
+                - If the query is about breached tickets, only consider rows where 'Breached' == "Yes".
+                - For queries involving ticket lists, only return the following columns:
+                    - Ticket  
+                    - Priority  
+                    - Assigned To  
+                    - Allowed Duration  
+                    - Total Elapsed Time  
+                    - Time to Breach  
+                    - Status  
+                    - Breached  
 
-        4. Code Structure Guidelines:
-            - Provide only Python code, no explanations.
-            - Ensure the code:
-                - Loads `{csv_file_path}` using pandas.
-                - Filters and processes data based on the query.
-                - Uses comments for readability.
-                - For date range queries:
-                    - Converts date columns to datetime objects
-                    - Handles different date formats if present
-                    - Uses proper date comparison logic
+            4. Code Structure Guidelines:
+                - Provide only Python code, no explanations.
+                - Ensure the code:
+                    - Loads `{csv_file_path}` using pandas.
+                    - Filters and processes data based on the query.
+                    - Uses comments for readability.
 
-        5. Tabular Output for React Compatibility:
-            - Format the output as an HTML table for clarity.
-            - Use proper `<table>`, `<thead>`, `<tbody>`, `<tr>`, and `<td>` tags.
-            - Ensure the table structure is well-formed.
-            - For date range results, include the date column used for filtering.
-            - Html conversion should be properly done like considering the accurate 'table_id' etc.
+            5. Tabular Output for React Compatibility:
+                - Format the output as an HTML table for clarity.
+                - Use proper `<table>`, `<thead>`, `<tbody>`, `<tr>`, and `<td>` tags.
+                - Ensure the table structure is well-formed.
 
-        6. Download Handling:
-            - Only generate a downloadable CSV file if explicitly requested.
-            - If requested, provide a script that saves the filtered data as `filtered_data_<timestamp>.csv`.
+            6. Download Handling:
+                - Only generate a downloadable CSV file if explicitly requested.
+                - If requested, provide a script that saves the filtered data as `filtered_data_<timestamp>.csv`.
 
-        7. Strict Query Handling:
-            - If the query is unclear, return "Invalid query: Please clarify your request."
-            - Do not generate responses based on assumptions.
-            - For date range queries, if no appropriate date column exists, return "No date column available for this filtering."
+            7. Strict Query Handling:
+                - If the query is unclear, return "Invalid query: Please clarify your request."
+                - Do not generate responses based on assumptions.
 
-        User Query: {query}
-        """
+            User Query: {query}
+            """
 
         code = generate_code(prompt_eng)
         print(code)
