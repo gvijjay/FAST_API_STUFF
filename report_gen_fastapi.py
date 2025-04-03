@@ -130,9 +130,14 @@ def generate_image(prompt: str, size: str):
     if size not in valid_sizes:
         size = "1024x1024"  # Fallback to default
 
+    formatted_prompt = (
+        f"High-resolution, ultra pure-realistic image of {prompt}. "
+        "Photorealistic, highly detailed, natural lighting, cinematic composition, 8K resolution, DSLR-quality."
+    )
+
     response = client.images.generate(
-        model="dall-e-3",
-        prompt=f"Ultra-realistic photograph of {prompt},highly detailed, lifelike, natural lighting, cinematic composition, 8K resolution",
+        model="dall-e-2",
+        prompt=formatted_prompt,
         n=1,
         size=size
     )
