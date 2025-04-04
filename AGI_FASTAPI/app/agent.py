@@ -74,7 +74,7 @@ def delete_agent(
 
 
 #Reading all the agents
-@router.get("/all", response_model=List[Agent])
+@router.get("/", response_model=List[Agent])
 def read_all_agents(db_service: DatabaseService = Depends(DatabaseService)):
     agents = db_service.get_all_agents()
     if not agents:
