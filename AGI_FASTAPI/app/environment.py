@@ -35,7 +35,7 @@ def read_environment(
 
 
 #Update Environment
-@router.put("/update/{environment_id}", response_model=Environment)
+@router.post("/update/{environment_id}", response_model=Environment)
 def update_environment(
         environment_id: int,
         environment: EnvironmentCreate,
@@ -48,7 +48,7 @@ def update_environment(
 
 
 #Delete Environment
-@router.delete("/delete/{environment_id}")
+@router.get("/delete/{environment_id}")
 def delete_environment(
         environment_id: int,
         db_service: DatabaseService = Depends(DatabaseService)
