@@ -1,0 +1,18 @@
+# Core requirements
+fastapi
+uvicorn
+
+# Database
+sqlalchemy
+psycopg2-binary
+alembic
+
+# Environment variables
+python-dotenv
+
+# Data validation
+pydantic
+
+# Development tools
+python-multipart
+httpx
