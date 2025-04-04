@@ -55,7 +55,7 @@ def delete_dynamic_agent(
 
 
 #Reading all the dynamic agents
-@router.get("/all", response_model=List[DynamicAgent])
+@router.get("/", response_model=List[DynamicAgent])
 def read_all_dynamic_agents(db_service: DatabaseService = Depends(DatabaseService)):
     agents = db_service.get_all_dynamic_agents()
     if not agents:
