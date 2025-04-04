@@ -59,7 +59,7 @@ def delete_environment(
 
 
 #Read All environments
-@router.get("/all", response_model=List[Environment])
+@router.get("/", response_model=List[Environment])
 def read_all_environments(db_service: DatabaseService = Depends(DatabaseService)):
     environments = db_service.get_all_environments()
     if not environments:
