@@ -50,7 +50,7 @@ def read_agent(
     }
 
 #Updating an agent
-@router.put("/update/{agent_id}", response_model=Agent)
+@router.post("/update/{agent_id}", response_model=Agent)
 def update_agent(
         agent_id: int,
         agent: AgentCreate,
@@ -63,7 +63,7 @@ def update_agent(
 
 
 #Deleting an agent
-@router.delete("/delete/{agent_id}")
+@router.get("/delete/{agent_id}")
 def delete_agent(
         agent_id: int,
         db_service: DatabaseService = Depends(DatabaseService)
