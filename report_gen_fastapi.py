@@ -16,15 +16,14 @@ from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from typing import Optional
-import openai
 from openai import OpenAI
+from fastapi.middleware.cors import CORSMiddleware
+import PyPDF2
+from PyPDF2.errors import PdfReadError
 
 # Load environment variables
 load_dotenv()
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -87,33 +86,92 @@ Requirements:
 - All the content and the summary must and should collect from the Sources such as "Wikipedia" or "Company Press releases" or "each metric from reliable data" only.
 """
 
+# For file upload requests (we'll use Form data instead)
 
 @app.post("/analyze")
-def analyze_financial_query(request: QueryRequest):
-    """Processes user query and returns structured financial response."""
-    if not request.prompt:
-        return {"error": "Query cannot be empty."}
+async def analyze_financial_query(
+        prompt: Optional[str] = Form(None),
+        file: Optional[UploadFile] = File(None)
+):
+    """Processes user query and/or PDF file to return structured financial response."""
+    if not prompt and not file:
+        raise HTTPException(status_code=400, detail="Either query text or PDF file must be provided")
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": financial_prompt_template},
-                {"role": "user", "content": request.prompt}
-            ],
-            temperature=0.5,
-            max_tokens=1200
-        )
+        # Extract content from PDF if provided
+        source_text = ""
+        if file:
+            if file.content_type != "application/pdf":
+                raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-        raw_response = response.choices[0].message.content.strip()
-        structured_data = json.loads(raw_response)
-        return {"query": request.prompt, "response": structured_data}
+            try:
+                source_text = await extract_text_from_pdf(file)
+            except PdfReadError as e:
+                raise HTTPException(status_code=400, detail=f"Failed to read PDF file: {str(e)}")
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
 
-    except json.JSONDecodeError:
-        return {"error": "Failed to parse response as JSON."}
+        # Generate the analysis prompt
+        analysis_prompt = generate_analysis_prompt(source_text, prompt)
+
+        # Get analysis from LLM
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": financial_prompt_template},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+                temperature=0.5,
+                max_tokens=1200
+            )
+            raw_response = response.choices[0].message.content.strip()
+            structured_data = json.loads(raw_response)
+
+            return {
+                "query": prompt,
+                "document_analyzed": file.filename if file else None,
+                "response": structured_data
+            }
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=500, detail="Failed to parse AI response as JSON")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"AI processing error: {str(e)}")
+
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
+
+async def extract_text_from_pdf(file: UploadFile):
+    """Extract text content from uploaded PDF file"""
+    contents = await file.read()
+    try:
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(contents))
+        text = ""
+        for page in pdf_reader.pages:
+            page_text = page.extract_text()
+            if page_text:  # Only add if text was extracted
+                text += page_text + "\n"
+        return text.strip()
+    except Exception as e:
+        raise PdfReadError(f"PDF extraction failed: {str(e)}")
+
+
+def generate_analysis_prompt(source_text: str, user_prompt: Optional[str] = None):
+    """Generate appropriate prompt for analysis based on input source"""
+    if user_prompt:
+        return f"""
+        Analyze the following financial document based on the user query: {user_prompt}
+        Document content: {source_text}
+
+        Provide analysis in the required JSON format.
+        """
+    return f"""
+    Analyze the following financial document content:
+    {source_text}
+
+    Provide comprehensive financial analysis in the required JSON format.
+    """
 
 # ==============================================
 # Image Generation Endpoints
