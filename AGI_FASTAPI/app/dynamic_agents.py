@@ -32,7 +32,7 @@ def read_dynamic_agent(
     return agent
 
 #Updating Dynamic agents
-@router.put("/update/{agent_id}", response_model=DynamicAgent)
+@router.post("/update/{agent_id}", response_model=DynamicAgent)
 def update_dynamic_agent(
         agent_id: int,
         dynamic_agent: DynamicAgentCreate,
@@ -44,7 +44,7 @@ def update_dynamic_agent(
     return updated
 
 #Deleting Dynamic agents
-@router.delete("/delete/{agent_id}")
+@router.get("/delete/{agent_id}")
 def delete_dynamic_agent(
         agent_id: int,
         db_service: DatabaseService = Depends(DatabaseService)
