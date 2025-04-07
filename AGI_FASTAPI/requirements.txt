@@ -16,3 +16,15 @@ pydantic
 # Development tools
 python-multipart
 httpx
+
+fastapi
+uvicorn
+python-dotenv
+openai
+pandas
+numpy
+requests
+markdown
+beautifulsoup4
+python-multipart
+pypdf2
