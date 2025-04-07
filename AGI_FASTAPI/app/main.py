@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from environment import router as environment_router
 from agent import router as agent_router
 from dynamic_agents import router as dynamic_agent_router
+from run import router as openai_router
+from report_gen_fastapi import router as sla_router
 from database import create_tables
 import logging
 
@@ -30,6 +32,8 @@ app.add_middleware(
 app.include_router(environment_router)
 app.include_router(agent_router)
 app.include_router(dynamic_agent_router)
+app.include_router(openai_router)
+app.include_router(sla_router)
 
 # Create tables on startup
 @app.on_event("startup")
