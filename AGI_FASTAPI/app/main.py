@@ -5,6 +5,7 @@ from agent import router as agent_router
 from dynamic_agents import router as dynamic_agent_router
 from run import router as openai_router
 from report_gen_fastapi import router as sla_router
+from dyn_agent_run import router as dyn_run_router
 from database import create_tables
 import logging
 
@@ -34,6 +35,7 @@ app.include_router(agent_router)
 app.include_router(dynamic_agent_router)
 app.include_router(openai_router)
 app.include_router(sla_router)
+app.include_router(dyn_run_router)
 
 # Create tables on startup
 @app.on_event("startup")
