@@ -26,7 +26,7 @@ class Environment(EnvironmentBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class AgentBase(BaseModel):
@@ -50,7 +50,7 @@ class Agent(AgentBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class DynamicAgentBase(BaseModel):
@@ -69,7 +69,7 @@ class DynamicAgent(DynamicAgentBase):
     id: int
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # --------------------------
