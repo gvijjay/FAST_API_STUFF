@@ -9,7 +9,7 @@ import re
 import textwrap
 import markdown
 from typing import Optional, List, Dict, Union, Type
-
+from fastapi import Request
 from fastapi_cache import FastAPICache
 from pydantic import BaseModel,Field
 from cachetools import cached, TTLCache
@@ -122,6 +122,7 @@ async def run_openai_environment(
         db: Session = Depends(get_db)
 ):
     # Access fields via request_data:
+    request: Request
     agent_id = request_data.agent_id
     prompt = request_data.prompt
     url = request_data.url
@@ -133,7 +134,7 @@ async def run_openai_environment(
         if file:
             print("DEBUG: File upload detected")
 
-            # Updated allowed content types
+            # Updated allowed content types including audio/video
             allowed_content_types = [
                 'application/pdf',
                 'application/msword',
@@ -145,6 +146,10 @@ async def run_openai_environment(
                 'text/csv',
                 'application/vnd.ms-excel',
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'audio/mpeg',  # MP3
+                'audio/mp3',  # Alternative MP3 type
+                'video/mp4',  # MP4
+                'video/mpeg',  # Alternative MP4 type
             ]
 
             print(f"DEBUG: File content type: {file.content_type}")
@@ -152,16 +157,21 @@ async def run_openai_environment(
 
             if file.content_type not in allowed_content_types:
                 _, file_ext = os.path.splitext(file.filename)
-                file_ext = file_ext.lower().lstrip('.')  # e.g., '.xlsx' → 'xlsx'
+                file_ext = file_ext.lower().lstrip('.')  # e.g., '.mp3' → 'mp3'
                 print(f"DEBUG: File extension: {file_ext}")
 
-                allowed_extensions = ['pdf', 'doc', 'docx', 'txt', 'jpg', 'jpeg', 'png', 'csv', 'xls', 'xlsx']
+                allowed_extensions = [
+                    'pdf', 'doc', 'docx', 'txt',
+                    'jpg', 'jpeg', 'png',
+                    'csv', 'xls', 'xlsx',
+                    'mp3', 'mp4'  # Added audio/video formats
+                ]
 
                 if file_ext not in allowed_extensions:
                     print("DEBUG: Unsupported file type")
                     raise HTTPException(
                         status_code=400,
-                        detail="Unsupported file type. Please upload PDF, DOC, DOCX, TXT, JPG, JPEG, PNG, CSV, XLS, or XLSX files."
+                        detail="Unsupported file type. Please upload: PDF, DOC, DOCX, TXT, JPG, JPEG, PNG, CSV, XLS, XLSX, MP3, or MP4 files."
                     )
                 else:
                     print("DEBUG: File type allowed by extension")
@@ -278,7 +288,7 @@ async def run_openai_environment(
             print("DEBUG: Processing medical_diagnosis request")
             file_content = await file.read()
             print("DEBUG: File content read successfully")
-            result = run_medical_diagnosis(openai_api_key, file_content.decode("utf-8"))
+            result = await run_medical_diagnosis(openai_api_key, file_content.decode("utf-8"))
             print(f"DEBUG: run_medical_diagnosis result: {result}")
 
             if not result:
@@ -345,7 +355,7 @@ async def run_openai_environment(
         # 6. Medical Image processing
         elif file and 'image_processing' in agent.backend_id:
             print("DEBUG: Processing medical image")
-            result = medical_image_analysis(openai_api_key, file)
+            result =  await medical_image_analysis(openai_api_key, file)
             print(f"DEBUG: medical_image_analysis result: {result}")
             if not result:
                 print("DEBUG: medical_image_analysis returned None")
@@ -358,7 +368,7 @@ async def run_openai_environment(
         # 7. Image answering
         elif file and prompt and 'image_answering' in agent.backend_id:
             print("DEBUG: Processing image answering")
-            result = visual_question_answering(openai_api_key, file, prompt)
+            result = await visual_question_answering(openai_api_key, file, prompt)
             print(f"DEBUG: visual_question_answering result: {result}")
             if not result:
                 print("DEBUG: visual_question_answering returned None")
@@ -377,17 +387,17 @@ async def run_openai_environment(
             if url_type == "YouTube":
                 if any(tool_id in agent.backend_id for tool_id in BLOG_TOOL_IDS):
                     print("DEBUG: Generating blog from YouTube URL")
-                    result = generate_blog_from_yt_url(prompt, url, 'blog_post', openai_api_key)
+                    result =await generate_blog_from_yt_url(prompt, url, 'blog_post', openai_api_key)
                 elif 'linkedin_post' in agent.backend_id:
                     print("DEBUG: Generating LinkedIn post from YouTube URL")
-                    result = generate_blog_from_yt_url(prompt, url, 'linkedin_post', openai_api_key)
+                    result =  await generate_blog_from_yt_url(prompt, url, 'linkedin_post', openai_api_key)
             else:
                 if any(tool_id in agent.backend_id for tool_id in BLOG_TOOL_IDS):
                     print("DEBUG: Generating blog from URL")
-                    result = generate_blog_from_url(prompt, url, 'blog_post', openai_api_key)
+                    result =  await generate_blog_from_url(prompt, url, 'blog_post', openai_api_key)
                 elif 'linkedin_post' in agent.backend_id:
                     print("DEBUG: Generating LinkedIn post from URL")
-                    result = generate_blog_from_url(prompt, url, 'linkedin_post', openai_api_key)
+                    result =  await generate_blog_from_url(prompt, url, 'linkedin_post', openai_api_key)
 
             if isinstance(result, dict):
                 print("DEBUG: Returning blog content")
@@ -395,14 +405,14 @@ async def run_openai_environment(
                 return JSONResponse(content={"answer": response_data})
 
         # 9. Blog Generation through file
-        elif file and prompt:
+        elif file and prompt and any(tool_id in agent.backend_id for tool_id in BLOG_TOOL_IDS):
             print("DEBUG: Processing blog generation from file")
             if any(tool_id in agent.backend_id for tool_id in BLOG_TOOL_IDS):
                 print("DEBUG: Generating blog from file")
-                result = generate_blog_from_file(prompt, file, 'blog_post', openai_api_key)
+                result = await generate_blog_from_file(prompt, file, 'blog_post', openai_api_key)
             elif 'linkedin_post' in agent.backend_id:
                 print("DEBUG: Generating LinkedIn post from file")
-                result = generate_blog_from_file(prompt, file, 'linkedin_post', openai_api_key)
+                result = await generate_blog_from_file(prompt, file, 'linkedin_post', openai_api_key)
 
             if isinstance(result, dict):
                 print("DEBUG: Returning blog content from file")
@@ -412,7 +422,7 @@ async def run_openai_environment(
         # 10. MCQ Generator
         elif prompt and 'mcq_generator' in agent.backend_id:
             print("DEBUG: Processing MCQ generation")
-            result = mcq_generation(openai_api_key, prompt)
+            result =  await mcq_generation(openai_api_key, prompt)
             print(f"DEBUG: mcq_generation result: {result}")
             if "answer" in result:
                 print("DEBUG: Returning MCQ result")
@@ -423,13 +433,13 @@ async def run_openai_environment(
             print("DEBUG: Processing synthetic data generation")
             if prompt and file:
                 print("DEBUG: Handling synthetic data from Excel with prompt")
-                result = handle_synthetic_data_from_excel(file, openai_api_key, prompt)
+                result =  await handle_synthetic_data_from_excel(file, openai_api_key, prompt)
             elif file:
                 print("DEBUG: Handling fill missing data")
-                result = handle_fill_missing_data(file, openai_api_key)
+                result =  await handle_fill_missing_data(file, openai_api_key)
             else:
                 print("DEBUG: Handling synthetic data for new data")
-                result = handle_synthetic_data_for_new_data(prompt, openai_api_key)
+                result =  await handle_synthetic_data_for_new_data(prompt, openai_api_key)
 
             print(f"DEBUG: Synthetic data result: {result}")
             if result and "data" in result:
@@ -441,6 +451,7 @@ async def run_openai_environment(
             else:
                 print("DEBUG: Unexpected error in synthetic data")
                 raise HTTPException(status_code=500, detail="An unexpected error occurred.")
+
 
         # Final else condition
         else:
