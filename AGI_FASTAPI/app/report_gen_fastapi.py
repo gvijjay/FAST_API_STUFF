@@ -45,89 +45,81 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 class QueryRequest(BaseModel):
     prompt: str
 
-
-financial_prompt_template = """
-You are an expert financial analyst providing real-time insights into company performance. Analyze the financial data of [Company Name] using the latest available information from reliable sources, including MarketScreener, Bloomberg, Mint, Wikipedia, and company filings.
-Ensure the response follows this JSON format:
-{
-  "title": "[Suitable title with Company Name]",
-  "summary": "Brief overview of financial performance of [Company Name]",
-  "paragraphs": [
-    {
-      "content": "Detailed analysis including revenue,statistics, net profit, EPS, and growth of [Company Name]"
-    },
-    {
-      "content": "Comparison with competitors and market trends of [Company Name]."
-    },
-    {
-      "content": "Predicted growth areas and risks based on data ."
-    }
-  ]
-}
-
-Requirements:
--Do not include any '**' or '##" or anything in the final response.just give the plain text as the response.
--'Summary' should be present for 3-4 lines.
-- The number of paragraphs will be 6-7 only.
--'Context' should be within 5-6 lines and the very important content should be there.
--'title' should be inserted based on the user query only.The title must be unique.
-- All the content and the summary must and should collect from the Sources such as "Wikipedia" or "Company Press releases" or "each metric from reliable data" only.
-"""
-
-# For file upload requests (we'll use Form data instead)
-
 @router.post("/analyze")
 async def analyze_financial_query(
-        prompt: Optional[str] = Form(None),
+        prompt: str = Form(..., description="The financial analysis request with company name and focus areas"),
         file: Optional[UploadFile] = File(None)
 ):
-    """Processes user query and/or PDF file to return structured financial response."""
-    if not prompt and not file:
-        raise HTTPException(status_code=400, detail="Either query text or PDF file must be provided")
-
     try:
-        # Extract content from PDF if provided
         source_text = ""
         if file:
             if file.content_type != "application/pdf":
                 raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
             try:
                 source_text = await extract_text_from_pdf(file)
-            except PdfReadError as e:
-                raise HTTPException(status_code=400, detail=f"Failed to read PDF file: {str(e)}")
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
 
-        # Generate the analysis prompt
-        analysis_prompt = generate_analysis_prompt(source_text, prompt)
+        dynamic_prompt = f"""
+        Generate a comprehensive annual financial report in JSON format with the following structure:
 
-        # Get analysis from LLM
+        1. title, subtitle, company name, and report date.
+        2. contact info under 'cover' with website, email, and phone.
+        3. tableOfContents with 8-10 named chapters.
+        4. chapters include multiple sections: 'highlight', 'quote', 'twoTextColumns', 'metricContainer', 'image'.
+        5. all financial figures must be realistic, based on industry norms and publicly available sources.
+        6. images from Unsplash with real URLs relevant to financial charts and corporate visuals.
+        7. bibliography with citations (Wikipedia, company press releases, financial filings).
+        8. footer and footerBibliography sections with appropriate contact details.
+        9. Content generation should be in between 7 to 10 lines.
+
+        IMPORTANT: Return ONLY the JSON content, without any additional text or commentary before or after it.
+        The response must begin with {{ and end with }}.
+
+        User prompt: {prompt}
+        Additional context: {source_text if source_text else 'No additional documents provided'}
+        """
+
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": financial_prompt_template},
-                    {"role": "user", "content": analysis_prompt}
+                    {"role": "system", "content": "You are a financial reporting assistant creating structured JSON financial reports. Return ONLY valid JSON without any additional commentary or text."},
+                    {"role": "user", "content": dynamic_prompt}
                 ],
-                temperature=0.5,
-                max_tokens=1200
+                temperature=0.3,
+                max_tokens=4000,
+                response_format={"type": "json_object"}  # This enforces JSON output
             )
-            raw_response = response.choices[0].message.content.strip()
-            structured_data = json.loads(raw_response)
 
-            return {
-                "query": prompt,
-                "document_analyzed": file.filename if file else None,
-                "response": structured_data
+            raw_response = response.choices[0].message.content
+
+            if not raw_response or raw_response.strip() == "":
+                raise HTTPException(status_code=500, detail="Empty response from language model.")
+
+            # Directly parse the JSON (the response_format should ensure it's valid)
+            try:
+                report = json.loads(raw_response)
+            except json.JSONDecodeError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"JSON parsing error: {str(e)} | Raw response: {raw_response[:300]}"
+                )
+
+            report["requestDetails"] = {
+                "userPrompt": prompt,
+                "generatedAt": datetime.datetime.now().isoformat(),
+                "imageSources": "Unsplash stock photos"
             }
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=500, detail="Failed to parse AI response as JSON")
+
+            return report
+
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"AI processing error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+
 
 
 async def extract_text_from_pdf(file: UploadFile):
