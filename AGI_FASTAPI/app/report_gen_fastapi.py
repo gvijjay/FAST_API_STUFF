@@ -47,8 +47,8 @@ class QueryRequest(BaseModel):
 
 @router.post("/analyze")
 async def analyze_financial_query(
-        prompt: str = Form(..., description="The financial analysis request with company name and focus areas"),
-        file: Optional[UploadFile] = File(None)
+    prompt: str = Form(..., description="The financial analysis request with company name and focus areas"),
+    file: Optional[UploadFile] = File(None)
 ):
     try:
         source_text = ""
@@ -61,20 +61,28 @@ async def analyze_financial_query(
                 raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
 
         dynamic_prompt = f"""
-        Generate a comprehensive annual financial report in JSON format with the following structure:
+        Generate a structured financial report in valid JSON using the following object style:
 
-        1. title, subtitle, company name, and report date.
-        2. contact info under 'cover' with website, email, and phone.
-        3. tableOfContents with 8-10 named chapters.
-        4. chapters include multiple sections: 'highlight', 'quote', 'twoTextColumns', 'metricContainer', 'image'.
-        5. all financial figures must be realistic, based on industry norms and publicly available sources.
-        6. images from Unsplash with real URLs relevant to financial charts and corporate visuals.
-        7. bibliography with citations (Wikipedia, company press releases, financial filings).
-        8. footer and footerBibliography sections with appropriate contact details.
-        9. Content generation should be in between 7 to 10 lines.
+        const financialReport2024 = {{
+          title: "...",
+          subtitle: "...",
+          company: "...",
+          date: "...",
+          cover: {{ website, email, phone }},
+          tableOfContents: [ {{ chapterNumber, title }}... ],
+          chapters: [ {{ title, sections: [{{ type, content|columns|metrics|url|caption }}] }}... ],
+          bibliography: [ {{ number, citation }}... ],
+          footer: {{ website, disclaimer }},
+          footerBibliography: {{ website, email, phone }}
+        }};
 
-        IMPORTANT: Return ONLY the JSON content, without any additional text or commentary before or after it.
-        The response must begin with {{ and end with }}.
+        Only generate the JSON object content inside that constant, not the JavaScript wrapping.
+        Ensure all image URLs are real Unsplash links and all numbers are based on reliable public financial sources.
+        The content for every section (highlight, quote, metric, etc.) must be **exactly 65 words long**.
+        The table of contents should include between 8 and 10 headings.
+        Use only Unsplash for images.
+        Everything must strictly follow the format above.
+
 
         User prompt: {prompt}
         Additional context: {source_text if source_text else 'No additional documents provided'}
@@ -84,22 +92,25 @@ async def analyze_financial_query(
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a financial reporting assistant creating structured JSON financial reports. Return ONLY valid JSON without any additional commentary or text."},
+                    {"role": "system", "content": "You are a financial reporting assistant creating structured JSON financial reports exactly in the format specified."},
                     {"role": "user", "content": dynamic_prompt}
                 ],
                 temperature=0.3,
-                max_tokens=4000,
-                response_format={"type": "json_object"}  # This enforces JSON output
+                max_tokens=4000
             )
 
             raw_response = response.choices[0].message.content
-
             if not raw_response or raw_response.strip() == "":
                 raise HTTPException(status_code=500, detail="Empty response from language model.")
 
-            # Directly parse the JSON (the response_format should ensure it's valid)
+            cleaned = raw_response.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned.removeprefix("```json").strip()
+            if cleaned.endswith("```"):
+                cleaned = cleaned.removesuffix("```").strip()
+
             try:
-                report = json.loads(raw_response)
+                report = json.loads(cleaned)
             except json.JSONDecodeError as e:
                 raise HTTPException(
                     status_code=500,
@@ -119,7 +130,6 @@ async def analyze_financial_query(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
-
 
 
 async def extract_text_from_pdf(file: UploadFile):
