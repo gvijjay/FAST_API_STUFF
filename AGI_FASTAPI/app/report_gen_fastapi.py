@@ -61,7 +61,7 @@ async def analyze_financial_query(
                 raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
 
         dynamic_prompt = f"""
-        Generate a structured financial report in valid JSON using the following object style:
+        Generate a structured financial report in valid JSON strictly using the following structure and field names only.
 
         const financialReport2024 = {{
           title: "...",
@@ -70,19 +70,51 @@ async def analyze_financial_query(
           date: "...",
           cover: {{ website, email, phone }},
           tableOfContents: [ {{ chapterNumber, title }}... ],
-          chapters: [ {{ title, sections: [{{ type, content|columns|metrics|url|caption }}] }}... ],
+          chapters: [
+            {{
+              title: "...",
+              sections: [
+                {{ type: "highlight", content: "Minimum 100 words" }},
+                {{ type: "quote", content: "Minimum 100 words" }},
+                {{
+                  type: "twoTextColumns",
+                  columns: [
+                    {{ title: "...", content: "List or paragraph" }},
+                    {{ title: "...", content: "List or paragraph" }}
+                  ]
+                }},
+                {{
+                  type: "twoColumns",
+                  columns: [
+                    {{
+                      content: [
+                        {{ title: "...", content: "...", footnotes?: [...] }},
+                        {{ title: "...", content: "..." }}
+                      ]
+                    }},
+                    {{ type: "image", url: "...", caption: "..." }}
+                  ]
+                }},
+                {{ type: "pageBreak" }},
+                {{ type: "metricContainer", metrics: ["key: value", ...] }}
+              ]
+            }}
+          ],
           bibliography: [ {{ number, citation }}... ],
           footer: {{ website, disclaimer }},
           footerBibliography: {{ website, email, phone }}
         }};
 
-        Only generate the JSON object content inside that constant, not the JavaScript wrapping.
-        Ensure all image URLs are real Unsplash links and all numbers are based on reliable public financial sources.
-        The content for every section (highlight, quote, metric, etc.) must be **exactly 65 words long**.
-        The table of contents should include between 8 and 10 headings.
-        Use only Unsplash for images.
-        Everything must strictly follow the format above.
-
+        Rules:
+        - Output only the inner JSON content (do NOT include `const financialReport2024 =` or any JS code)
+        - Each `highlight`, `quote`, and `highlightLight` section must contain a **minimum of 50 words**
+        - Use only real financial metrics and realistic values
+        - Use real Unsplash image URLs with relevant business/finance imagery
+        - Table of contents should include atleast 6 chapters
+        -The above template should be applicable to all the chapters generated dynamically
+        - Do not rename, skip, or add any fields
+        - Use accurate field order and nesting
+        - No summarization or external text—only output JSON
 
         User prompt: {prompt}
         Additional context: {source_text if source_text else 'No additional documents provided'}
@@ -99,23 +131,23 @@ async def analyze_financial_query(
                 max_tokens=4000
             )
 
-            raw_response = response.choices[0].message.content
-            if not raw_response or raw_response.strip() == "":
-                raise HTTPException(status_code=500, detail="Empty response from language model.")
-
-            cleaned = raw_response.strip()
-            if cleaned.startswith("```json"):
-                cleaned = cleaned.removeprefix("```json").strip()
-            if cleaned.endswith("```"):
-                cleaned = cleaned.removesuffix("```").strip()
+            raw_response = response.choices[0].message.content or ""
+            cleaned = raw_response.strip().strip("`").strip()
 
             try:
                 report = json.loads(cleaned)
             except json.JSONDecodeError as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"JSON parsing error: {str(e)} | Raw response: {raw_response[:300]}"
-                )
+                logger.error("Failed to parse model response. Attempting to recover. Raw: %s", raw_response[:1000])
+                # Try to fix by trimming to last closing brace
+                brace_index = cleaned.rfind("}")
+                if brace_index != -1:
+                    fixed = cleaned[:brace_index + 1]
+                    try:
+                        report = json.loads(fixed)
+                    except Exception:
+                        raise HTTPException(status_code=500, detail=f"Final recovery failed: {str(e)} | Raw: {raw_response[:300]}")
+                else:
+                    raise HTTPException(status_code=500, detail=f"Unrecoverable JSON format | Raw: {raw_response[:300]}")
 
             report["requestDetails"] = {
                 "userPrompt": prompt,
