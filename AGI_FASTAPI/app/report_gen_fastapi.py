@@ -29,8 +29,6 @@ router = APIRouter(prefix="/sla_report", tags=["sla_report"])
 logger = logging.getLogger(__name__)
 
 
-
-
 # Configure the media folder
 MEDIA_ROOT = 'media'
 if not os.path.exists(MEDIA_ROOT):
@@ -112,7 +110,7 @@ async def analyze_financial_query(
         - Each `highlight`, `quote`, and `highlightLight` section must contain a **minimum of 50 words**
         - Use only real financial metrics and realistic values
         - Use real Unsplash image URLs with relevant business/finance imagery
-        - Table of contents should include atleast 6 chapters
+        - Table of contents should include atleast 7 chapters
         -The above template should be applicable to all the chapters generated dynamically
         - Do not rename, skip, or add any fields
         - Use accurate field order and nesting
