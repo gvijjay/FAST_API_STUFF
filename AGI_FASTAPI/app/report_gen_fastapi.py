@@ -29,6 +29,8 @@ router = APIRouter(prefix="/sla_report", tags=["sla_report"])
 logger = logging.getLogger(__name__)
 
 
+
+
 # Configure the media folder
 MEDIA_ROOT = 'media'
 if not os.path.exists(MEDIA_ROOT):
