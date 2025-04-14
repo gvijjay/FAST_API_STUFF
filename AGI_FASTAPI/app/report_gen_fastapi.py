@@ -111,6 +111,8 @@ async def analyze_financial_query(
         - Use only real financial metrics and realistic values
         - Use real Unsplash image URLs with relevant business/finance imagery
         - Table of contents should include atleast 7 chapters
+        - you must give me the images that should be visible to the user.Do not generate the images with errors like 404 etc.Consider the real images only from the sites which are suitable to the {prompt
+    }
         -The above template should be applicable to all the chapters generated dynamically
         - Do not rename, skip, or add any fields
         - Use accurate field order and nesting
