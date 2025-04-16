@@ -61,62 +61,31 @@ async def analyze_financial_query(
                 raise HTTPException(status_code=400, detail=f"Error processing PDF: {str(e)}")
 
         dynamic_prompt = f"""
-        Generate a structured financial report in valid JSON strictly using the following structure and field names only.
+        Generate a structured financial report in valid JSON using the following structure and field names ONLY.
+        The report content must be DYNAMICALLY GENERATED based on the user prompt and uploaded document.
 
-        const financialReport2024 = {{
-          title: "...",
-          subtitle: "...",
-          company: "...",
-          date: "...",
-          cover: {{ website, email, phone }},
-          tableOfContents: [ {{ chapterNumber, title }}... ],
-          chapters: [
-            {{
-              title: "...",
-              sections: [
-                {{ type: "highlight", content: "Minimum 100 words" }},
-                {{ type: "quote", content: "Minimum 100 words" }},
-                {{
-                  type: "twoTextColumns",
-                  columns: [
-                    {{ title: "...", content: "List or paragraph" }},
-                    {{ title: "...", content: "List or paragraph" }}
-                  ]
-                }},
-                {{
-                  type: "twoColumns",
-                  columns: [
-                    {{
-                      content: [
-                        {{ title: "...", content: "...", footnotes?: [...] }},
-                        {{ title: "...", content: "..." }}
-                      ]
-                    }},
-                    {{ type: "image", url: "...", caption: "..." }}
-                  ]
-                }},
-                {{ type: "pageBreak" }},
-                {{ type: "metricContainer", metrics: ["key: value", ...] }}
-              ]
-            }}
-          ],
-          bibliography: [ {{ number, citation }}... ],
-          footer: {{ website, disclaimer }},
-          footerBibliography: {{ website, email, phone }}
+        const financialReport = {{
+          title: string,
+          subtitle: string,
+          logo: string (URL),
+          company: string,
+          date: string,
+          logos: [string (URL), ...],
+          about: {{ title: string, content: [string, ...], highlights: [string, ...] }},
+          contents: [{{ title: string, data: [object, ...] }}, ...],
+          overview: {{ title: string, goals: [string, ...], initiatives: [string, ...] }},
+          outlook: {{ title: string, projections: [{{ metric, projection, target }}...], risks: [string, ...] }},
+          contact: {{ website: string, email: string, phone: string }}
         }};
 
         Rules:
-        - Output only the inner JSON content (do NOT include `const financialReport2024 =` or any JS code)
-        - Each `highlight`, `quote`, and `highlightLight` section must contain a **minimum of 50 words**
-        - Use only real financial metrics and realistic values
-        - Use real Unsplash image URLs with relevant business/finance imagery
-        - Table of contents should include atleast 7 chapters
-        - you must give me the images that should be visible to the user.Do not generate the images with errors like 404 etc.Consider the real images only from the sites which are suitable to the {prompt
-    }
-        -The above template should be applicable to all the chapters generated dynamically
-        - Do not rename, skip, or add any fields
-        - Use accurate field order and nesting
-        - No summarization or external text—only output JSON
+        - Use the above structure strictly, but content must be based on user prompt and uploaded document
+        - All fields should be dynamically generated: no hardcoded content
+        - all content should be in atleast 40 words.
+        - The images what you have generated is absolutely realistic with the real data provided from the resources only in the internet.
+        - Do NOT include `const financialReport =` or any JS code; return only the inner JSON
+        - Use realistic, properly formatted financial/business data
+        - Use fluent, formal financial English language
 
         User prompt: {prompt}
         Additional context: {source_text if source_text else 'No additional documents provided'}
@@ -126,7 +95,7 @@ async def analyze_financial_query(
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a financial reporting assistant creating structured JSON financial reports exactly in the format specified."},
+                    {"role": "system", "content": "You are a financial reporting assistant creating structured JSON financial reports based on the user prompt and context."},
                     {"role": "user", "content": dynamic_prompt}
                 ],
                 temperature=0.3,
@@ -140,7 +109,6 @@ async def analyze_financial_query(
                 report = json.loads(cleaned)
             except json.JSONDecodeError as e:
                 logger.error("Failed to parse model response. Attempting to recover. Raw: %s", raw_response[:1000])
-                # Try to fix by trimming to last closing brace
                 brace_index = cleaned.rfind("}")
                 if brace_index != -1:
                     fixed = cleaned[:brace_index + 1]
@@ -164,7 +132,6 @@ async def analyze_financial_query(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
-
 
 async def extract_text_from_pdf(file: UploadFile):
     """Extract text content from uploaded PDF file"""
