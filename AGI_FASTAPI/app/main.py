@@ -9,6 +9,7 @@ from dyn_agent_run import router as dyn_run_router
 from database import create_tables
 import logging
 
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +40,7 @@ app.include_router(dyn_run_router)
 
 # Create tables on startup
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     create_tables()
 
 if __name__ == "__main__":
