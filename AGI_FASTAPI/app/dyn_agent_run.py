@@ -229,7 +229,7 @@ async def run_agent_environment(
             user_prompt=request.prompt,
             api_key=env_details.api_key
         )
-        logger.debug(f"OpenAI raw response: {openai_response}")
+        print(f"OpenAI raw response: {openai_response}")
 
         if not openai_response.get("success"):
             error_msg = openai_response.get("error", "OpenAI API call failed")
@@ -239,10 +239,10 @@ async def run_agent_environment(
                 detail=error_msg
             )
 
-        chat_content = openai_response.get("choices", [{}])[0].get("message", {}).get("content", "")
-        logger.debug(f"Received chat content (length: {len(chat_content)} chars)")
+        chat_content = openai_response["response"]["choices"][0]["message"]["content"]
+        logger.info(f"Received chat content (length: {len(chat_content)} chars)")
         markdown_content = markdown_to_html(chat_content)
-        logger.debug("Converted content to markdown")
+        logger.info("Converted content to markdown")
 
         # Handle tools if specified
         if agent.tools:
