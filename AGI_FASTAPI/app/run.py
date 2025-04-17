@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 
@@ -48,14 +49,20 @@ class AgentRequest(BaseModel):
         example="https://example.com"
     )
 
+
 class FileUploadRequest(AgentRequest):
-    file: Optional[UploadFile] = Field(
+    single_file: Optional[UploadFile] = Field(
         None,
-        description="Single file upload (PDF, DOC, DOCX, TXT, JPG, PNG, JPEG)",
+        description="Single file upload",
         example="document.pdf"
     )
+    multiple_files: Optional[List[UploadFile]] = Field(
+        None,
+        description="Multiple file uploads",
+        example=["file1.pdf", "file2.docx"]
+    )
+
     class Config:
-        # This is important for file uploads in Pydantic models
         arbitrary_types_allowed = True
 
 
@@ -118,65 +125,82 @@ def markdown_to_html(markdown_text: str) -> str:
 # Main endpoint with database integration
 @router.post("/run_openai_environment/")
 async def run_openai_environment(
+        request: Request,
         request_data: FileUploadRequest = Depends(),
         db: Session = Depends(get_db)
 ):
     # Access fields via request_data:
-    request: Request
     agent_id = request_data.agent_id
     prompt = request_data.prompt
     url = request_data.url
-    file = request_data.file
+    single_file = request_data.single_file
+    multiple_files= request_data.multiple_files
     print("DEBUG: Entering run_openai_environment endpoint")
     try:
-        print(f"DEBUG: Received parameters - agent_id: {agent_id}, prompt: {prompt}, url: {url}, file: {file}")
+        print(f"DEBUG: Received parameters - agent_id: {agent_id}, prompt: {prompt}, url: {url}")
+        print(f"DEBUG: Single file: {single_file.filename if single_file else None}")
+        print(f"DEBUG: Multiple files: {[f.filename for f in multiple_files] if multiple_files else None}")
 
-        if file:
-            print("DEBUG: File upload detected")
+        # Define allowed file types and extensions
+        ALLOWED_CONTENT_TYPES = [
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'text/plain',
+            'image/jpeg', 'image/png', 'image/jpg',
+            'text/csv',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'audio/mpeg', 'audio/mp3',
+            'video/mp4', 'video/mpeg'
+        ]
 
-            # Updated allowed content types including audio/video
-            allowed_content_types = [
-                'application/pdf',
-                'application/msword',
-                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'text/plain',
-                'image/jpeg',
-                'image/png',
-                'image/jpg',
-                'text/csv',
-                'application/vnd.ms-excel',
-                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                'audio/mpeg',  # MP3
-                'audio/mp3',  # Alternative MP3 type
-                'video/mp4',  # MP4
-                'video/mpeg',  # Alternative MP4 type
-            ]
+        ALLOWED_EXTENSIONS = [
+            'pdf', 'doc', 'docx', 'txt',
+            'jpg', 'jpeg', 'png',
+            'csv', 'xls', 'xlsx',
+            'mp3', 'mp4'
+        ]
 
-            print(f"DEBUG: File content type: {file.content_type}")
-            print(f"DEBUG: File filename: {file.filename}")
+        def validate_file(file: UploadFile):
+            """Validate a single file's type and size"""
+            print(f"DEBUG: Validating file: {file.filename}")
 
-            if file.content_type not in allowed_content_types:
-                _, file_ext = os.path.splitext(file.filename)
-                file_ext = file_ext.lower().lstrip('.')  # e.g., '.mp3' → 'mp3'
-                print(f"DEBUG: File extension: {file_ext}")
-
-                allowed_extensions = [
-                    'pdf', 'doc', 'docx', 'txt',
-                    'jpg', 'jpeg', 'png',
-                    'csv', 'xls', 'xlsx',
-                    'mp3', 'mp4'  # Added audio/video formats
-                ]
-
-                if file_ext not in allowed_extensions:
-                    print("DEBUG: Unsupported file type")
+            # Check content type first
+            if file.content_type not in ALLOWED_CONTENT_TYPES:
+                # Fall back to extension check
+                _, ext = os.path.splitext(file.filename)
+                ext = ext.lower().lstrip('.')
+                if ext not in ALLOWED_EXTENSIONS:
                     raise HTTPException(
                         status_code=400,
-                        detail="Unsupported file type. Please upload: PDF, DOC, DOCX, TXT, JPG, JPEG, PNG, CSV, XLS, XLSX, MP3, or MP4 files."
+                        detail=f"Unsupported file type: {file.filename}. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
                     )
-                else:
-                    print("DEBUG: File type allowed by extension")
+                print(f"DEBUG: File {file.filename} allowed by extension")
             else:
-                print("DEBUG: File type allowed by content type")
+                print(f"DEBUG: File {file.filename} allowed by content type")
+
+            # Check file size (e.g., 10MB limit)
+            MAX_SIZE = 10 * 1024 * 1024  # 10MB
+            file.file.seek(0, 2)  # Move to end
+            size = file.file.tell()
+            file.file.seek(0)  # Reset cursor
+            if size > MAX_SIZE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File {file.filename} exceeds size limit (max {MAX_SIZE / 1024 / 1024}MB)"
+                )
+
+        # Validate all files
+        all_files = []
+        if single_file:
+            validate_file(single_file)
+            all_files.append(single_file)
+        if multiple_files:
+            for file in multiple_files:
+                validate_file(file)
+            all_files.extend(multiple_files)
+
         # Initialize database service
         print("DEBUG: Initializing database service")
         db_service = DatabaseService(db)
@@ -205,9 +229,9 @@ async def run_openai_environment(
         BLOG_TOOL_IDS = ['blog_post', 'audio_blog', 'video_blog', 'youtube_blog']
 
         # 1. Text_to_sql application
-        if file and prompt and 'text_to_sql' in agent.backend_id:
+        if single_file and prompt and 'text_to_sql' in agent.backend_id:
             print("DEBUG: Processing text_to_sql request")
-            result = await gen_response(file, prompt, client)
+            result = await gen_response(single_file, prompt, client)
             print(f"DEBUG: gen_response result: {result}")
 
             if not result:
@@ -225,10 +249,10 @@ async def run_openai_environment(
                 raise HTTPException(status_code=400, detail="No valid output from gen_response")
 
         # 2. Chat to doc within specific page numbers and querying
-        elif file and prompt and 'chat_to_doc_within_page_range' in agent.backend_id:
+        elif single_file and prompt and 'chat_to_doc_within_page_range' in agent.backend_id:
             print("DEBUG: Processing chat_to_doc_within_page_range request")
             try:
-                if not file.filename:
+                if not single_file.filename:
                     print("DEBUG: No file uploaded")
                     raise HTTPException(status_code=400, detail="No file uploaded")
                 if not prompt.strip():
@@ -238,7 +262,7 @@ async def run_openai_environment(
                 print("DEBUG: Processing document question answering")
                 result = await document_question_answering(
                     api_key=openai_api_key,
-                    uploaded_file=file,
+                    uploaded_file=single_file,
                     query=prompt.strip()
                 )
                 print(f"DEBUG: document_question_answering result: {result}")
@@ -268,12 +292,66 @@ async def run_openai_environment(
                     detail=f"Document processing error: {str(e)}"
                 )
 
+        # 2.1 ATS Tracker application
+        if (single_file or multiple_files) and prompt and 'ats_tracker' in agent.backend_id:
+            print("DEBUG: Processing ATS Tracker request")
+
+            # Determine if we have single file or multiple files
+            resume_files = []
+            if single_file:
+                resume_files.append(single_file)
+            if multiple_files:
+                resume_files.extend(multiple_files)
+
+            if not resume_files:
+                print("DEBUG: No resume files provided")
+                raise HTTPException(status_code=400, detail="No resume files provided")
+
+            print(f"DEBUG: Processing {len(resume_files)} resume files")
+            result = await analyze_resume(prompt, resume_files, openai_api_key)
+
+            if "error" in result:
+                print(f"DEBUG: Error in resume analysis: {result['error']}")
+                raise HTTPException(status_code=400, detail=result["error"])
+
+            if "JD Match" in result:
+                print("DEBUG: Single resume analysis result")
+                markdown_content = f"""\
+                       **Job Description Match:** {result.get("JD Match", "N/A")}
+                       **Missing Keywords:** {", ".join(result.get("MissingKeywords", [])) if result.get("MissingKeywords") else "None"}
+                       **Profile Summary:** {result.get("Profile Summary", "No summary available")}
+                       **Suggestions:** {chr(10).join([f"- {suggestion}" for suggestion in result.get("Suggestions", [])])}
+                   """.strip()
+
+                html_content = markdown_to_html(markdown_content)
+                return JSONResponse(content={"answers": html_content})
+
+            elif "summary" in result and "detailed_results" in result:
+                print("DEBUG: Multiple resume analysis result")
+                detailed_results_html = []
+                for res in result["detailed_results"]:
+                    markdown_content = f"""\
+                           **Resume:** {res.get("filename", "Unknown")}
+                           **Job Description Match:** {res.get("JD Match", "N/A")}
+                           **Missing Keywords:** {", ".join(res.get("MissingKeywords", [])) if res.get("MissingKeywords") else "None"}
+                           **Profile Summary:** {res.get("Profile Summary", "No summary available")}
+                           **Suggestions:** {chr(10).join([f"- {suggestion}" for suggestion in res.get("Suggestions", [])])}
+                       """.strip()
+                    html_content = markdown_to_html(markdown_content)
+                    detailed_results_html.append(html_content)
+
+                return JSONResponse(content={
+                    "summary": result["summary"],
+                    "detailed_results": detailed_results_html
+                })
+            else:
+                print("DEBUG: Unexpected ATS Tracker result format")
+                raise HTTPException(status_code=500, detail="Unexpected response format from ATS Tracker")
+
+
         # 3. Travel planner agent
         elif prompt and 'travel_planner' in agent.backend_id:
             print("DEBUG: Processing travel_planner request")
-            # travel_planner_agent = TravelPlannerAgent(openai_api_key)
-            # destination, days = travel_planner_agent.parse_user_input(prompt)
-            # print(f"DEBUG: Parsed travel details - destination: {destination}, days: {days}")
             result = await generate_travel_plan(prompt, openai_api_key)
             print(f"DEBUG: generate_travel_plan result: {result}")
             if not result:
@@ -284,9 +362,9 @@ async def run_openai_environment(
                 return JSONResponse(content={"answer": markdown_to_html(result["answer"])})
 
         # 4. Medical Diagnosis Agent
-        elif file and 'medical_diagnosis' in agent.backend_id:
+        elif single_file and 'medical_diagnosis' in agent.backend_id:
             print("DEBUG: Processing medical_diagnosis request")
-            file_content = await file.read()
+            file_content = await single_file.read()
             print("DEBUG: File content read successfully")
             result = await run_medical_diagnosis(openai_api_key, file_content.decode("utf-8"))
             print(f"DEBUG: run_medical_diagnosis result: {result}")
@@ -317,17 +395,7 @@ async def run_openai_environment(
 
                 elif prompt_type == "query":
                     print("DEBUG: Continuing existing conversation")
-                    cache_key = request.headers.get("X-Cache-Key") or request.query_params.get("cache_key")
-                    print(f"DEBUG: Using cache key: {cache_key}")
-
-                    if not cache_key:
-                        print("DEBUG: Cache key missing")
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Cache key required. Please start learning first by providing a topic."
-                        )
-
-                    result = await chat_with_agent(cache_key, prompt, openai_api_key)
+                    result = await chat_with_latest_topic(prompt, openai_api_key)
                     print("DEBUG: Chat with agent completed")
 
                     return JSONResponse(content={
@@ -352,10 +420,11 @@ async def run_openai_environment(
                     detail=f"Error processing education request: {str(e)}"
                 )
 
+
         # 6. Medical Image processing
-        elif file and 'image_processing' in agent.backend_id:
+        elif single_file and 'image_processing' in agent.backend_id:
             print("DEBUG: Processing medical image")
-            result =  await medical_image_analysis(openai_api_key, file)
+            result =  await medical_image_analysis(openai_api_key, single_file)
             print(f"DEBUG: medical_image_analysis result: {result}")
             if not result:
                 print("DEBUG: medical_image_analysis returned None")
@@ -366,9 +435,9 @@ async def run_openai_environment(
                 return JSONResponse(content={"answer": markdown_to_html(result["result"])})
 
         # 7. Image answering
-        elif file and prompt and 'image_answering' in agent.backend_id:
+        elif single_file and prompt and 'image_answering' in agent.backend_id:
             print("DEBUG: Processing image answering")
-            result = await visual_question_answering(openai_api_key, file, prompt)
+            result = await visual_question_answering(openai_api_key, single_file, prompt)
             print(f"DEBUG: visual_question_answering result: {result}")
             if not result:
                 print("DEBUG: visual_question_answering returned None")
@@ -405,14 +474,14 @@ async def run_openai_environment(
                 return JSONResponse(content={"answer": response_data})
 
         # 9. Blog Generation through file
-        elif file and prompt and any(tool_id in agent.backend_id for tool_id in BLOG_TOOL_IDS):
+        elif single_file and prompt and any(tool_id in agent.backend_id for tool_id in BLOG_TOOL_IDS):
             print("DEBUG: Processing blog generation from file")
             if any(tool_id in agent.backend_id for tool_id in BLOG_TOOL_IDS):
                 print("DEBUG: Generating blog from file")
-                result = await generate_blog_from_file(prompt, file, 'blog_post', openai_api_key)
+                result = await generate_blog_from_file(prompt, single_file, 'blog_post', openai_api_key)
             elif 'linkedin_post' in agent.backend_id:
                 print("DEBUG: Generating LinkedIn post from file")
-                result = await generate_blog_from_file(prompt, file, 'linkedin_post', openai_api_key)
+                result = await generate_blog_from_file(prompt, single_file, 'linkedin_post', openai_api_key)
 
             if isinstance(result, dict):
                 print("DEBUG: Returning blog content from file")
@@ -431,12 +500,12 @@ async def run_openai_environment(
         # 11. Synthetic_data_generator
         elif 'synthetic_data_generation' in agent.backend_id:
             print("DEBUG: Processing synthetic data generation")
-            if prompt and file:
+            if prompt and single_file:
                 print("DEBUG: Handling synthetic data from Excel with prompt")
-                result =  await handle_synthetic_data_from_excel(file, openai_api_key, prompt)
-            elif file:
+                result =  await handle_synthetic_data_from_excel(single_file, openai_api_key, prompt)
+            elif single_file:
                 print("DEBUG: Handling fill missing data")
-                result =  await handle_fill_missing_data(file, openai_api_key)
+                result =  await handle_fill_missing_data(single_file, openai_api_key)
             else:
                 print("DEBUG: Handling synthetic data for new data")
                 result =  await handle_synthetic_data_for_new_data(prompt, openai_api_key)
@@ -856,98 +925,114 @@ async def run_medical_diagnosis(api_key: str, medical_report: str) -> Dict[str, 
 from wyge.prebuilt_agents.teaching_agent import teaching_agent_fun
 from wyge.prebuilt_agents.generating_syllabus import generate_syllabus
 
+# In-memory cache dictionary
+IN_MEMORY_CACHE: Dict[str, Dict[str, Any]] = {}
+# In-memory topic to cache mapping
+TOPIC_CACHE_MAP: Dict[str, str] = {}
+# Track last started topic
+LAST_TOPIC: Dict[str, str] = {}
+
 
 async def start_learning(request: Request, topic: str, api_key: str) -> Dict[str, Any]:
-    """
-    Starts the learning process by generating a syllabus and initializing cache data.
-    """
     try:
         if not topic or not topic.strip():
             raise HTTPException(status_code=400, detail="Topic is required")
 
-        # Generate the syllabus
-        syllabus = generate_syllabus(api_key, topic, "Focus on providing a clear learning path.")
+        topic = topic.strip().lower()
+        if topic in TOPIC_CACHE_MAP:
+            cache_key = TOPIC_CACHE_MAP[topic]
+            cached_data = IN_MEMORY_CACHE.get(cache_key)
+            if cached_data:
+                LAST_TOPIC["current"] = topic
+                return {
+                    "topic": topic,
+                    "syllabus": cached_data["syllabus"],
+                    "cache_key": cache_key
+                }
 
-        # Extract only the content if it's an AIMessage
+        syllabus = generate_syllabus(api_key, topic, "Focus on providing a clear learning path.")
         if hasattr(syllabus, "content"):
             syllabus = syllabus.content
 
-        # Generate a unique cache key (using client IP + custom identifier)
         client_ip = request.client.host if request.client else "0.0.0.0"
         cache_key = f"edu_data_{client_ip}_{uuid.uuid4().hex[:8]}"
 
-        # Store syllabus and topic in cache
-        await FastAPICache.set(
-            key=cache_key,
-            value={
-                "syllabus": syllabus,
-                "current_topic": topic,
-                "messages": []  # Initialize conversation history
-            },
-            expire=3600  # Cache for 1 hour
-        )
+        IN_MEMORY_CACHE[cache_key] = {
+            "syllabus": syllabus,
+            "current_topic": topic,
+            "messages": []
+        }
+        TOPIC_CACHE_MAP[topic] = cache_key
+        LAST_TOPIC["current"] = topic
 
         return {
             "topic": topic,
             "syllabus": syllabus,
-            "cache_key": cache_key  # Return cache key to client for subsequent requests
+            "cache_key": cache_key
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error starting learning: {str(e)}")
 
 
+async def chat_with_latest_topic(user_input: str, api_key: str) -> Dict[str, Any]:
+    try:
+        topic = LAST_TOPIC.get("current")
+        if not topic:
+            raise HTTPException(status_code=400, detail="No topic found in session. Please start learning first.")
+        return await chat_with_agent_by_topic(topic, user_input, api_key)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resolving latest topic: {str(e)}")
+
+
+async def chat_with_agent_by_topic(topic: str, user_input: str, api_key: str) -> Dict[str, Any]:
+    try:
+        topic = topic.strip().lower()
+        cache_key = TOPIC_CACHE_MAP.get(topic)
+        if not cache_key:
+            raise HTTPException(status_code=400, detail="No cache key found for topic. Please start learning first.")
+        return await chat_with_agent(cache_key, user_input, api_key)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resolving topic to cache key: {str(e)}")
+
+
 async def chat_with_agent(cache_key: str, user_input: str, api_key: str) -> Dict[str, Any]:
-    """
-    Handles user interaction with the teaching agent using cache-based session storage.
-    """
     try:
         if not cache_key:
             raise HTTPException(status_code=400, detail="Cache key is required")
         if not user_input or not user_input.strip():
             raise HTTPException(status_code=400, detail="User input cannot be empty")
 
-        # Retrieve cached data
-        edu_data = await FastAPICache.get(key=cache_key)
+        edu_data = IN_MEMORY_CACHE.get(cache_key)
         if not edu_data or "syllabus" not in edu_data or "current_topic" not in edu_data:
             raise HTTPException(status_code=400, detail="No training data found. Please start learning first.")
 
-        # Recreate the teaching agent dynamically
         teaching_agent = teaching_agent_fun(api_key)
 
-        # Retrieve messages from the cache
         conversation_history = edu_data.get("messages", [])
-
-        # Rebuild past conversation
         for msg in conversation_history:
             if msg["role"] == "user":
                 teaching_agent["add_user_message"](msg["content"])
             elif msg["role"] == "assistant":
                 teaching_agent["add_ai_message"](msg["content"])
 
-        # Add new user message
         teaching_agent["add_user_message"](user_input)
-
-        # Generate AI response
         response = teaching_agent["generate_response"]()
 
-        # Extract AI response content
         response_content = response.content if hasattr(response, "content") else str(response)
 
-        # Update conversation history with JSON-safe data
         conversation_history.append({"role": "user", "content": user_input})
         conversation_history.append({"role": "assistant", "content": response_content})
 
-        # Store updated conversation in cache
         edu_data["messages"] = conversation_history
-        await FastAPICache.set(key=cache_key, value=edu_data, expire=3600)
+        IN_MEMORY_CACHE[cache_key] = edu_data
 
         return {
             "user_message": user_input,
             "assistant_response": response_content,
-            "cache_key": cache_key  # Return same cache key for subsequent requests
+            "cache_key": cache_key
         }
 
     except HTTPException:
