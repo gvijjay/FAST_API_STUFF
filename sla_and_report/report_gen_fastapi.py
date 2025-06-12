@@ -637,6 +637,7 @@ async def sla_query(query: str = Form(...)):
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 
+
 @app.get("/sla/download")
 async def download_sla_report():
     """Download the SLA report."""
@@ -644,6 +645,77 @@ async def download_sla_report():
     if not os.path.exists(report_path):
         raise HTTPException(status_code=404, detail="Report not found")
     return FileResponse(report_path, filename="final_report.csv")
+
+#---------------------------------------------------------------------------------------------
+#New sla_code(june 11th 2025)
+FIXED_FILE_PATH = os.path.join(MEDIA_ROOT, "sla_data.xlsx")
+@app.post("/query_making")
+async def sla_query_updated(query: str = Form(...), file: UploadFile = File(...)):
+    try:
+        greetings = {"hi", "hello", "hey", "greetings"}
+
+        if query.lower() in greetings:
+            greeting_response = generate_response("Respond to the user greeting in a friendly and engaging manner.")
+            return JSONResponse({"answer": markdown_to_html(greeting_response)})
+
+        # Overwrite fixed Excel file on every upload
+        with open(FIXED_FILE_PATH, "wb") as buffer:
+            buffer.write(await file.read())
+
+        df = pd.read_excel(FIXED_FILE_PATH)
+        metadata_str = ", ".join(df.columns.tolist())
+
+        prompt_eng = f"""
+            You are a Python expert specializing in data preprocessing. Your task is to answer user queries strictly based on the dataset `{FIXED_FILE_PATH}`. Follow these strict rules:
+            
+            1. Strict Dataset Constraints:
+                - You can only refer to the columns and data present in the Excel file.
+                - Do not make any assumptions or external calculations.
+                - Available columns: {metadata_str}.
+                - Dataset preview (first 10 rows):  
+                  {df.head(10)}
+            In this context tickets is nothing but Request-ID in the dataset and Request - Resource Assigned To - Name is nothing but username.
+            2. Rules for Query Execution:
+                - Perform operations directly on the dataset.
+                - Do not assume missing data unless explicitly mentioned.
+                - No implicit conversions (e.g., do not convert hours to minutes unless specified).
+                - Only return results filtered exactly as per the query.
+
+            3. Handling Ticket Queries:
+                - If the query is about the tickets regarding count,you can give the answers generally with ticket and its respected count in a tabular form.
+                - For queries involving ticket lists, only return the following columns:
+                    - Request-ID
+                    - Request-Subject Description
+                    - Request - Resource Assigned To - Name
+                -If any query is related to the count of tickets then add the count variable to the above columns as the extra parameter. 
+                -If any Request-Subject Description information present in the query,then you have to filter the tickets based on the Request-Subject Description and use the above template to show the output.
+
+            4. Code Structure Guidelines:
+                - Provide only Python code, no explanations.
+                - Ensure the code:
+                    - Loads `{FIXED_FILE_PATH}` using pandas.
+                    - Filters and processes data based on the query.
+                    - Uses comments for readability.
+
+            5. Tabular Output for React Compatibility:
+                - Format the output as an HTML table for clarity.
+                - Use proper <table>, <thead>, <tbody>, <tr>, and <td> tags.
+                - Ensure the table structure is well-formed.
+
+            6. Strict Query Handling:
+                - If the query is unclear, return "Invalid query: Please clarify your request."
+                - Do not generate responses based on assumptions.
+
+            User Query: {query}
+        """
+
+        code = generate_code(prompt_eng)
+        print("Generated Code:\n", code)
+        result = execute_py_code(code, df)
+        return JSONResponse({"answer": result})
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 
 # ==============================================
