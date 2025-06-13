@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 import requests
 import uvicorn
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException,Request
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
@@ -649,8 +649,15 @@ async def download_sla_report():
 #---------------------------------------------------------------------------------------------
 #New sla_code(june 11th 2025)
 FIXED_FILE_PATH = os.path.join(MEDIA_ROOT, "sla_data.xlsx")
+
+dataframe_cache: dict[str, pd.DataFrame] = {}  # Session-level cache
+
 @app.post("/query_making")
-async def sla_query_updated(query: str = Form(...), file: UploadFile = File(...)):
+async def sla_query_updated(
+        request: Request,
+        query: str = Form(...),
+        file: Optional[UploadFile] = File(None)
+):
     try:
         greetings = {"hi", "hello", "hey", "greetings"}
 
@@ -658,16 +665,25 @@ async def sla_query_updated(query: str = Form(...), file: UploadFile = File(...)
             greeting_response = generate_response("Respond to the user greeting in a friendly and engaging manner.")
             return JSONResponse({"answer": markdown_to_html(greeting_response)})
 
-        # Overwrite fixed Excel file on every upload
-        with open(FIXED_FILE_PATH, "wb") as buffer:
-            buffer.write(await file.read())
+        # Determine session ID from header or assign a default one
+        session_id = request.headers.get("X-Session-ID", "global")
 
-        df = pd.read_excel(FIXED_FILE_PATH)
+        # If session not cached yet, expect a file upload and cache it
+        if session_id not in dataframe_cache:
+            if file is None:
+                raise HTTPException(status_code=400, detail="Initial request must include a file upload.")
+            with open(FIXED_FILE_PATH, "wb") as buffer:
+                buffer.write(await file.read())
+            df = pd.read_excel(FIXED_FILE_PATH)
+            dataframe_cache[session_id] = df
+        else:
+            df = dataframe_cache[session_id]
+
         metadata_str = ", ".join(df.columns.tolist())
 
         prompt_eng = f"""
             You are a Python expert specializing in data preprocessing. Your task is to answer user queries strictly based on the dataset `{FIXED_FILE_PATH}`. Follow these strict rules:
-            
+
             1. Strict Dataset Constraints:
                 - You can only refer to the columns and data present in the Excel file.
                 - Do not make any assumptions or external calculations.
