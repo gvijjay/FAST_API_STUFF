@@ -1,4 +1,5 @@
 # main.py
+import asyncio
 import base64
 import json
 import datetime
@@ -647,50 +648,75 @@ async def download_sla_report():
     return FileResponse(report_path, filename="final_report.csv")
 
 #---------------------------------------------------------------------------------------------
+
 #New sla_code(june 11th 2025)
 FIXED_FILE_PATH = os.path.join(MEDIA_ROOT, "sla_data.xlsx")
-
-dataframe_cache: dict[str, pd.DataFrame] = {}  # Session-level cache
+dataframe_cache: dict[str, pd.DataFrame] = {}  # Session-level cache (3-column filtered)
+query_cache: dict[str, dict[str, str]] = {}  # session_id -> query -> result
 
 @app.post("/query_making")
 async def sla_query_updated(
-        request: Request,
-        query: str = Form(...),
-        file: Optional[UploadFile] = File(None)
+    request: Request,
+    query: str = Form(...),
+    file: Optional[UploadFile] = File(None)
 ):
+    greetings = {"hi", "hello", "hey", "greetings"}
+    query_lower = query.lower()
+
+    if query_lower in greetings:
+        greeting_response = "<p>Hello! How can I assist you today?</p>"
+        return JSONResponse({"answer": greeting_response})
+
+    session_id = request.headers.get("X-Session-ID", "global")
+
     try:
-        greetings = {"hi", "hello", "hey", "greetings"}
+        session_queries = query_cache.setdefault(session_id, {})
+        if query in session_queries:
+            return JSONResponse({"answer": session_queries[query]})
 
-        if query.lower() in greetings:
-            greeting_response = generate_response("Respond to the user greeting in a friendly and engaging manner.")
-            return JSONResponse({"answer": markdown_to_html(greeting_response)})
+        df = dataframe_cache.get(session_id)
 
-        # Determine session ID from header or assign a default one
-        session_id = request.headers.get("X-Session-ID", "global")
-
-        # If session not cached yet, expect a file upload and cache it
-        if session_id not in dataframe_cache:
+        if df is None:
             if file is None:
                 raise HTTPException(status_code=400, detail="Initial request must include a file upload.")
-            with open(FIXED_FILE_PATH, "wb") as buffer:
-                buffer.write(await file.read())
-            df = pd.read_excel(FIXED_FILE_PATH)
+
+            content = await file.read()
+            raw_df = pd.read_excel(io.BytesIO(content))
+
+            preview_columns = [
+                "Request - ID",
+                "Request - Subject description",
+                "Request - Resource Assigned To - Name"
+            ]
+            df = raw_df[preview_columns].copy()
             dataframe_cache[session_id] = df
-        else:
-            df = dataframe_cache[session_id]
 
         metadata_str = ", ".join(df.columns.tolist())
+        preview_df = df.head(2).to_string(index=False)
 
-        prompt_eng = f"""
+        prompt_eng = build_prompt(metadata_str,preview_df,query)
+        code = await asyncio.to_thread(generate_code1, prompt_eng)
+        result = await asyncio.to_thread(execute_py_code1, code, df)
+
+        session_queries[query] = result
+
+        return JSONResponse({"answer": result})
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+
+
+def build_prompt(metadata_str: str, preview_df: str, query: str) -> str:
+    return f"""
             You are a Python expert specializing in data preprocessing. Your task is to answer user queries strictly based on the dataset `{FIXED_FILE_PATH}`. Follow these strict rules:
 
             1. Strict Dataset Constraints:
                 - You can only refer to the columns and data present in the Excel file.
                 - Do not make any assumptions or external calculations.
                 - Available columns: {metadata_str}.
-                - Dataset preview (first 10 rows):  
-                  {df.head(10)}
-            In this context tickets is nothing but Request-ID in the dataset and Request - Resource Assigned To - Name is nothing but username.
+                - Dataset preview (first 5 rows):
+                  {preview_df}
+ 
             2. Rules for Query Execution:
                 - Perform operations directly on the dataset.
                 - Do not assume missing data unless explicitly mentioned.
@@ -703,35 +729,67 @@ async def sla_query_updated(
                     - Request-ID
                     - Request-Subject Description
                     - Request - Resource Assigned To - Name
-                -If any query is related to the count of tickets then add the count variable to the above columns as the extra parameter. 
+                -If any query is related to the count of tickets then add the count variable to the above columns as the extra parameter.
                 -If any Request-Subject Description information present in the query,then you have to filter the tickets based on the Request-Subject Description and use the above template to show the output.
+                -In this context tickets is nothing but Request-ID in the dataset and Request - Resource Assigned To - Name is nothing but username but use the naming conventions as:
+                    Request -ID = Request-ID.
+                    Request-Subject Description = Subject Description
+                    Request - Resource Assigned To - Name = Resource Assigned
+                    and Dont use alias names like ticket,username in the response.
 
             4. Code Structure Guidelines:
                 - Provide only Python code, no explanations.
                 - Ensure the code:
-                    - Loads `{FIXED_FILE_PATH}` using pandas.
+                    - Loads dataset using pandas.
                     - Filters and processes data based on the query.
-                    - Uses comments for readability.
 
             5. Tabular Output for React Compatibility:
                 - Format the output as an HTML table for clarity.
                 - Use proper <table>, <thead>, <tbody>, <tr>, and <td> tags.
-                - Ensure the table structure is well-formed.
+                - Ensure the table structure is well-formed and present in the dataframe format for the frontend.
 
             6. Strict Query Handling:
                 - If the query is unclear, return "Invalid query: Please clarify your request."
-                - Do not generate responses based on assumptions.
 
             User Query: {query}
         """
 
-        code = generate_code(prompt_eng)
-        print("Generated Code:\n", code)
-        result = execute_py_code(code, df)
-        return JSONResponse({"answer": result})
+
+def extract_code(text: str) -> str:
+    if "```python" in text:
+        return text.split("```python")[-1].split("```", 1)[0].strip()
+    return text.strip()
+
+def execute_py_code1(code: str, df: pd.DataFrame) -> str:
+    buffer = io.StringIO()
+    sys.stdout = buffer
+    local_vars = {'df': df}
+
+    try:
+        exec(code, globals(), local_vars)
+        output = buffer.getvalue().strip()
+
+        if not output:
+            last_line = code.strip().split('\n')[-1]
+            if not last_line.startswith(('print', 'return')):
+                output = str(eval(last_line, globals(), local_vars))
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
+        output = f"Error executing code: {str(e)}"
+    finally:
+        sys.stdout = sys.__stdout__
+
+    return output
+
+def generate_code1(prompt_eng: str) -> str:
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt_eng}
+        ]
+    )
+    return extract_code(response.choices[0].message.content.strip())
 
 
 # ==============================================
